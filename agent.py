@@ -10,41 +10,43 @@ import os
 from langchain.chat_models import init_chat_model
 from dotenv import load_dotenv
 
-from tools import get_page_content, get_next_monday_connections, login_to_webpage, ignore_webpage_in_future
+from tools import get_page_content, get_next_monday_connections, login_to_webpage
 from langgraph.prebuilt import ToolNode, tools_condition
 
+from utils import remember_non_job_link
 
 # %% Internal functions
 load_dotenv()
 
 agent_prompt = """
-    You are a job listing summarizer. The user provides a webpage content, extract and summarize the following information.
-    You must respond in JSON format with the following structure:
+    You are a job listing summarizer. The user provides a URL, extract and summarize the following information.
+    You must respond in JSON format with the following structure, and all fields with an asterisk
+    should only be answered using the information provided in the webpage content:
     {
-    "link": "URL to job posting",
-    "firma": "Company name",
-    "ort": "Location/City",
-    "home_office_moeglich": "Yes/No",
-    "pensum_moeglich": "[80%, 60%] or [80%] or [60%]",
-    "festanstellung": "Yes/No",
-    "grundausbildung": ["List of required basic education"],
-    "berufserfahrung": ["List of required professional experience"],
-    "strasse_hausnummer": "Street and house number",
+    "firma*": "Company name",
+    "ort*": "Location/City",
+    "home_office_moeglich*": "Yes/No",
+    "pensum_moeglich*": "[80%, 60%] or [80%] or [60%]",
+    "festanstellung*": "Yes/No",
+    "grundausbildung*": ["List of required basic education"],
+    "berufserfahrung*": ["List of required professional experience"],
+    "strasse_hausnummer*": "City, Street and house number if available, else rough address if available",
     "fahrtdauer_ov": "Travel time in minutes (using Transport.opendata.ch for next Monday at 8 AM from given address)",
     "sichere_anstellung": "Explanation for the security status",
-    "stress": "Yes/No",
-    "ethische_probleme": ["List of potential ethical issues"]
+    "stress": "Might the job be stressful? Why?",
+    "ethische_probleme": "Potential ethical issues"
     }
 
-    You have tools at your disposal to get what you need to answer the question.
+    You have these tools at your disposal:
     1. get_next_monday_connections: gives you the travel time to the job location
-    2. get_page_content: gives you the content of the job posting
+    2. get_page_content: gives you the content of a URL
     3. login_to_webpage: logins to the job posting website in case get_page_content gave you a login page
     4. ignore_webpage_in_future: if the site is not a job posting (e.g. an unsubscribe link), please call this function to ignore it in the future
+                        and return an empty dict {}
 """
 
 
-def get_graph_builder():
+def get_graph_builder(sender: str):
     """
     Get graph builder for agent pipeline
     """
@@ -56,6 +58,22 @@ def get_graph_builder():
 
     llm = init_chat_model("openai:gpt-3.5-turbo")
 
+    # Define tools
+    @tool
+    def ignore_webpage_in_future(link:str,remove_after: List[str] = ['&','?']) -> bool:
+        """
+        Ignore a webpage in the future
+
+        Args:
+            link: The non-job link to add
+            remove_after: List of strings before which the link will be cut before saving, e.g. ['&'] or ['&','?']
+                would mean that a link like 'https://www.jobs.ch/123456789?param1=value1&param2=value2' would 
+                be cut to 'https://www.jobs.ch/123456789'
+
+        Returns:
+            True if the webpage was successfully ignored, False otherwise
+        """
+        return remember_non_job_link(sender, link, remove_after)
     tools = [
         get_page_content,
         get_next_monday_connections,
@@ -103,8 +121,8 @@ def stream_graph_updates(user_input: str, graph:StateGraph)-> list[str]:
 
 
 # %% Functions called by other scripts
-def summarize_website(url:str)-> dict[str, str]:
-    graph = get_graph_builder().compile()
+def summarize_website(url:str,sender:str)-> dict[str, str]:
+    graph = get_graph_builder(sender).compile()
     replies = stream_graph_updates(url, graph)
     result = replies[-1]
     try:

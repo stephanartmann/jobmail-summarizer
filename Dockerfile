@@ -38,5 +38,9 @@ ENV PATH=$PATH:/usr/local/bin
 RUN useradd -m -s /bin/bash appuser
 USER appuser
 
+# Install ChromeDriver for user
+RUN python -c 'from webdriver_manager.chrome import ChromeDriverManager;ChromeDriverManager().install()'
+RUN chmod u+rwx /home/appuser/.wdm/drivers/chromedriver/linux64/136.0.7103.94/chromedriver-linux64/chromedriver
+
 # Run the email checker
-CMD ["python", "static_workflow.py"]
+CMD ["python", "main.py"]

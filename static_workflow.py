@@ -3,41 +3,43 @@ import os
 import time
 import logging
 from datetime import datetime
-from tools import *
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from bs4 import BeautifulSoup
 import openai
 from dotenv import load_dotenv
 from typing import Callable,Optional
 import json
 
-from utils import get_unread_emails, extract_job_links, summarize_job_listing, send_email
+from utils import extract_job_links, get_chrome_driver, get_page_content_with_driver
 
 
-# Load environment variables
+# %% Load environment variables
 load_dotenv()
 
-
-
-def summary(page_content):
+# %% Internal functions
+def summarize_content(content:str,driver:webdriver.Chrome):
     # Prompt for job summarization
     definition_prompt = """
-    You are a job listing summarizer. For each job listing, extract and summarize the following information:
-    1. Job Title
-    2. Company Name
-    3. Location
-    4. Job Type (Full-time, Part-time, etc.)
-    5. Key Responsibilities (top 3)
-    6. Required Skills (top 3)
-    7. Salary Range (if available)
+    You are a job listing summarizer. The user provides a webpage content, extract and summarize the following information.
+    You must respond in JSON format with the following structure:
+    {
+    "firma*": "Company name",
+    "ort*": "Location/City",
+    "home_office_moeglich*": "Yes/No",
+    "pensum_moeglich*": "[80%, 60%] or [80%] or [60%]",
+    "festanstellung*": "Yes/No",
+    "grundausbildung*": ["List of required basic education"],
+    "berufserfahrung*": ["List of required professional experience"],
+    "strasse_hausnummer*": "City, Street and house number if available, else rough address if available",
+    "sichere_anstellung": "Explanation for the security status",
+    "stress": "Might the job be stressful? Why?",
+    "ethische_probleme": "Potential ethical issues"
+    }
 
-    Format the output as a markdown table with these columns:
-    | Job Title | Company | Location | Type | Key Responsibilities | Required Skills | Salary |
-
-    For each job, provide a concise summary of 1-2 sentences.
+    If the site is not a job posting (e.g. an unsubscribe link), return "FALSE" (without quotation marks)
     """
+    # Download page content
+    page_content = get_page_content_with_driver(url, driver)
+
+    # Summarize page content
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -48,15 +50,21 @@ def summary(page_content):
         )
         
         result = response.choices[0].message.content.strip()
+        if result == "FALSE":
+            ignore_webpage_in_future(SENDER_EMAIL, url)
+            return {}
         analysis = json.loads(result)  # Parse JSON response
-        return (analysis)
+        return analysis
     except Exception as e:
         print(f"Error analyzing email: {str(e)}")
-        return (False)
+        return {}
+    finally:
+        driver.quit()
+
 
 def check_if_login(url, page_content):
     """
-    Use GPT-4 to analyze the webpage and determine if it's a job page or login page
+    Use GPT-3.5 to analyze the webpage and determine if it's a job page or login page
     Returns: (is_job_page: bool, is_login_page: bool, login_fields: dict)
     """
     try:
@@ -93,40 +101,20 @@ def check_if_login(url, page_content):
         print(f"Error analyzing webpage: {str(e)}")
         return (False, False, {})
 
-def is_job_email(email_content):
-    """
-    Use OpenAI to determine if an email is job-related.
 
-    Deprecated: instead, we focus on a jobmail folder in gmail where we assume that all mails
-    are job-related.
-    """
-    try:
-        definition_prompt = f"""
-        You are an email classifier. Analyze the email content that the user provides
-        and determine if it is a job-related email.
-        An email is considered job-related if it contains:
-        1. Job listings or job opportunities
-        2. Recruiting or hiring information
-        3. Job application instructions
-        4. Career opportunities
-        
-        Respond ONLY with 'yes' if it's job-related, or 'no' if it's not.
-        """
-        
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": definition_prompt},
-                {"role": "user", "content": email_content}
-            ]
-        )
-        
-        answer = response.choices[0].message.content.strip().lower()
-        return answer == 'yes'
-    except Exception as e:
-        print(f"Error classifying email: {str(e)}")
-        return False
-
+# %% Functions to be called by other scripts
+def summarize_website(url:str,sender:str):
+    driver = get_chrome_driver()
+    page_content = get_page_content_with_driver(url, driver)
+    is_job_page, is_login_page, login_fields = check_if_login(url, page_content)
+    if is_login_page:
+        if not login_to_webpage(url, login_fields):
+            return {}
+        page_content = get_page_content_with_driver(url, driver)
+        is_job_page, is_login_page, login_fields = check_if_login(url, page_content)
+    if is_job_page:
+        return summarize_content(page_content, driver)
+    return {}
 
 
 # %%

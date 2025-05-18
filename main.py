@@ -6,6 +6,10 @@ from utils import get_unread_emails, extract_job_links
 from tools import login_to_webpage, get_page_content, get_next_monday_connections
 import logging
 import agent
+import static_workflow
+from typing import Callable, List
+
+import pandas as pd
 
 def job_link_extraction_pipeline():
     all_job_links = []
@@ -24,7 +28,7 @@ def job_link_extraction_pipeline():
                 logging.info(f"Found {len(job_links)} job links in email from {sender}:")
                 for link in job_links:
                     logging.info(f"- {link}")
-                    all_job_links.append(link)
+                    all_job_links.append((link,sender))
             else:
                 logging.info("No job links found in email.")
         except Exception as e:
@@ -32,7 +36,7 @@ def job_link_extraction_pipeline():
             raise
     return all_job_links
 
-def summary_pipeline(summarizer: Callable[str]):
+def summary_pipeline(summarizer: Callable[str,str]) -> List[dict]:
     """
     Pipeline: Get unread emails and extract job links
     """
@@ -41,10 +45,10 @@ def summary_pipeline(summarizer: Callable[str]):
 
     # For all links: sent them to agent to summarize
     summaries = []
-    for link in job_links:
+    for link,sender in job_links:
         try:
             logging.info(f"Summarizing job link: {link}")
-            summary = summarizer(link)
+            summary = summarizer(link,sender)
             summaries.append(summary)
             logging.info(f"Summary: {summary}")
         except Exception as e:
@@ -94,12 +98,20 @@ def main():
 
     pipeline = sys.argv[1]
     if pipeline == 'agent':
-        summary_pipeline(agent.summarize_website)
+        summaries = summary_pipeline(agent.summarize_website)
     elif pipeline == 'static':
-        summary_pipeline(static.summarize_website)
+        summaries = summary_pipeline(static_workflow.summarize_website)
     else:
         print(f"Invalid pipeline short name: {pipeline} Should be one of 'agent' or 'static'")
         sys.exit(1)
+    
+    # Convert summaries to markdown table
+    md_table = pd.DataFrame(summaries).to_markdown()
+    
+    # Send email
+    send_email("Job Summaries", md_table)
+    
 
+    
 if __name__ == "__main__":
     main()
