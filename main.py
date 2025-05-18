@@ -4,38 +4,54 @@ import shutil
 from datetime import datetime
 from utils import get_unread_emails, extract_job_links
 from tools import login_to_webpage, get_page_content, get_next_monday_connections
+import logging
+import agent
 
-def agent_pipeline():
-    """
-    Agent Pipeline: Get unread emails and extract job links
-    """
-    try:
-        # Get unread emails
-        emails = get_unread_emails()
-        if not emails:
-            print("No unread emails found.")
-            return
+def job_link_extraction_pipeline():
+    all_job_links = []
+    # Get unread emails
+    emails = get_unread_emails()
+    if not emails:
+        logging.info("No unread emails found.")
+        return
 
-        # Process each email
-        for email_content, sender in emails:
+    # Process each email
+    for email_content, sender in emails:
+        try:
             # Extract job links
             job_links = extract_job_links(email_content,sender)
             if job_links:
-                print(f"Found {len(job_links)} job links in email from {sender}:")
+                logging.info(f"Found {len(job_links)} job links in email from {sender}:")
                 for link in job_links:
-                    print(f"- {link}")
+                    logging.info(f"- {link}")
+                    all_job_links.append(link)
             else:
-                print("No job links found in email.")
+                logging.info("No job links found in email.")
+        except Exception as e:
+            logging.error(f"Error in agent pipeline: {str(e)}")
+            raise
+    return all_job_links
 
-    except Exception as e:
-        print(f"Error in agent pipeline: {str(e)}")
-        raise
+def summary_pipeline(summarizer: Callable[str]):
+    """
+    Pipeline: Get unread emails and extract job links
+    """
+    logging.info("Starting summary pipeline")
+    job_links = job_link_extraction_pipeline()
 
-def static_pipeline():
-    """
-    Static Pipeline: Currently same as agent pipeline
-    """
-    return agent_pipeline()
+    # For all links: sent them to agent to summarize
+    summaries = []
+    for link in job_links:
+        try:
+            logging.info(f"Summarizing job link: {link}")
+            summary = summarizer(link)
+            summaries.append(summary)
+            logging.info(f"Summary: {summary}")
+        except Exception as e:
+            logging.error(f"Error summarizing job link: {str(e)}")
+            raise
+    return summaries
+
 
 def main():
     # Check for --reset_cache flag
@@ -64,25 +80,25 @@ def main():
                 base, ext = os.path.splitext(file)
                 new_name = f"{base}_{timestamp}{ext}"
                 dst = os.path.join(old_cache_dir, new_name)
-                print(f"Moving {file} to {new_name} in .cache/old directory")
+                logging.info(f"Moving {file} to {new_name} in .cache/old directory")
                 shutil.move(src, dst)
 
     if len(sys.argv) < 2:
-        print("Usage: python main.py [pipeline_number] [--reset_cache]", file=sys.stderr)
+        print("Usage: python main.py [pipeline_name] [--reset_cache]", file=sys.stderr)
         print("Available pipelines:")
-        print("  agent - Get unread emails and extract job links")
-        print("  static - Currently same as agent pipeline")
+        print("  agent - Uses AI Agent to generate job summary")
+        print("  static - Less flexible and potentially more expensive, but possibly more reliable. Based on several LLM calls.")
         print("\nOptional arguments:")
-        print("  --reset_cache    Move all cache files to .cache/old directory with timestamp")
+        print("  --reset_cache    Reset cache and move all cache files to .cache/old directory with timestamp")
         sys.exit(1)
 
     pipeline = sys.argv[1]
     if pipeline == 'agent':
-        agent_pipeline()
+        summary_pipeline(agent.summarize_website)
     elif pipeline == 'static':
-        static_pipeline()
+        summary_pipeline(static.summarize_website)
     else:
-        print(f"Invalid pipeline number: {pipeline}")
+        print(f"Invalid pipeline short name: {pipeline} Should be one of 'agent' or 'static'")
         sys.exit(1)
 
 if __name__ == "__main__":
