@@ -1,0 +1,17 @@
+openai==1.68.2
+google-api-python-client==2.108.0
+google-auth-httplib2==0.1.1
+google-auth-oauthlib==1.1.0
+beautifulsoup4==4.12.2
+requests==2.31.0
+pandas==2.0.3
+numpy==1.24.3
+python-dotenv==1.0.0
+selenium==4.15.2
+webdriver_manager==4.0.1
+langgraph==0.4.3
+langchain==0.3.25
+python-multipart==0.0.6
+pydantic==2.7.4
+langchain-openai==0.3.17
+
