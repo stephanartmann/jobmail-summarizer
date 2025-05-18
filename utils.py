@@ -5,11 +5,7 @@ from datetime import datetime
 import pandas as pd
 import openai
 import json
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from google.oauth2 import service_account
+
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -24,8 +20,13 @@ from dotenv import load_dotenv
 from typing import List, Dict, Optional, Any
 import logging
 
-from gmail_handling import get_gmail_service
+import imaplib
+import email
+from email.header import decode_header
+import os
+from typing import List
 
+# %% Logging and configs
 
 # Configure logging
 logging.basicConfig(
@@ -180,36 +181,66 @@ def get_unread_emails() -> List[str]:
     Returns:
         List of email contents (snippets) from unread emails
     """
-    # Initialize Gmail service
-    service = get_gmail_service()
     
-    # Get unread emails from jobs folder
-    results = service.users().messages().list(
-        userId='me', 
-        q='is:unread in:{os.getenv("GMAIL_JOB_FOLDER")}'
-    ).execute()
-    messages = results.get('messages', [])
+    # Get environment variables
+    email_user = os.getenv('EMAIL')
+    email_pass = os.getenv('EMAIL_PASSWORD')
+    email_folder = os.getenv('EMAIL_JOB_FOLDER', 'INBOX')
     
-    if not messages:
-        print("No new emails found.")
-        return []
+    if not email_user or not email_pass:
+        raise ValueError("EMAIL and EMAIL_PASSWORD environment variables must be set")
     
-    email_contents = []
-    
-    for message in messages:
-        msg = service.users().messages().get(userId='me', id=message['id']).execute()
-        email_content = msg['snippet']
-        email_contents.append(email_content)
+    try:
+        # Get IMAP server from environment variables
+        imap_server = os.getenv('IMAP_SERVER', 'imap.gmail.com')
         
-    # Mark emails as read
-    for message in messages:
-        service.users().messages().modify(
-            userId='me',
-            id=message['id'],
-            body={'removeLabelIds': ['UNREAD']}
-        ).execute()
-    
-    return email_contents
+        # Connect to the IMAP server
+        mail = imaplib.IMAP4_SSL(imap_server)
+        mail.login(email_user, email_pass)
+        
+        # Select the specified folder
+        mail.select(email_folder)
+        
+        # Search for unread emails
+        status, messages = mail.search(None, 'UNSEEN')
+        if status != 'OK':
+            raise Exception(f"Failed to search for unread emails: {status}")
+        
+        # Get the list of email IDs
+        email_ids = messages[0].split()
+        
+        # Fetch content of each unread email
+        email_contents = []
+        for msg_num in email_ids:
+            status, msg_data = mail.fetch(msg_num, '(RFC822)')
+            if status != 'OK':
+                continue
+                
+            # Parse the email message
+            msg = email.message_from_bytes(msg_data[0][1])
+            
+            # Get email body
+            if msg.is_multipart():
+                for part in msg.walk():
+                    content_type = part.get_content_type()
+                    if content_type == 'text/plain':
+                        body = part.get_payload(decode=True).decode()
+                        email_contents.append(body)
+                        break
+            else:
+                body = msg.get_payload(decode=True).decode()
+                email_contents.append(body)
+        
+        # Close the connection
+        mail.close()
+        mail.logout()
+        
+        return email_contents
+        
+    except Exception as e:
+        print(f"Error fetching unread emails: {str(e)}")
+        return []
+
 
 
 def extract_job_links(
@@ -351,3 +382,4 @@ def get_mon_conns(to_location: str)->Dict:
     response.raise_for_status()  # Raise exception for bad status codes
     
     return response.json()
+# %%
