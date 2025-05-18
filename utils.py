@@ -17,7 +17,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 import logging
 
 import imaplib
@@ -25,6 +25,11 @@ import email
 from email.header import decode_header
 import os
 from typing import List
+import re
+
+import json
+from pathlib import Path
+
 
 # %% Logging and configs
 
@@ -82,9 +87,35 @@ def get_chrome_driver() -> webdriver.Chrome:
 
 
 # %% Helper Functions
+
+
+
+def extract_job_links_with_exceptions(content: str, exclude_patterns: List[str]) -> List[str]:
+    """
+    Extract all HTTPS links from email content while excluding links that contain specific patterns.
+    
+    Args:
+        content: Email content to extract links from
+        exclude_patterns: List of strings that, if present in a URL, will exclude that URL from results
+        
+    Returns:
+        List of extracted HTTPS links that don't match any exclude patterns
+    """
+    # Find all HTTPS links using regex
+    https_links = re.findall(r'https://[\w.-]+(?:/[\w.-]*)*(?:\?[^\s]*)?(?:#[^\s]*)?', content)
+    
+    # Filter out links that contain any of the exclude patterns
+    filtered_links = [
+        link for link in https_links 
+        if not any(pattern in link for pattern in exclude_patterns)
+    ]
+    
+    return filtered_links
+
+# %% Helper Functions
 def get_joblink_tags(page_content:str)->List[str]:
     """
-    Use GPT-3.5-turbo to return html tags of job links so that we can add them as keywords
+    Use GPT-4o to return html tags of job links so that we can add them as keywords
     to extract_job_links
     """
     try:
@@ -97,8 +128,39 @@ def get_joblink_tags(page_content:str)->List[str]:
         """
 
         
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": page_content}
+            ]
+        )
+        
+        result = response.choices[0].message.content.strip()
+        analysis = json.loads(result)  # Parse JSON response
+        return (analysis)
+    except Exception as e:
+        print(f"Error analyzing email: {str(e)}")
+        return (False)
+
+def exclude_non_joblinks(page_content:str)->List[str]:
+    """
+    Use GPT-4o to return html patterns so that we can exlude non-joblinks
+    """
+    try:
+        prompt = f"""
+        You are a non-job link extractor. Extract the html patterns https://... of non-job links from the page content
+        that the user provides. Make the patterns as short as possible so that they are the specific 
+        start of the link that does not point to a job.
+        
+        In particular, detect links pointing to "further jobs" (that are not explicit job links) 
+        or subscription settings (e.g. unsubscribe) or to app stores (e.g. google play, app store) etc. 
+        Format your response as a list of patterns: ["pattern1", "pattern2", ...]
+        """
+
+        
+        response = openai.chat.completions.create(
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": page_content}
@@ -173,13 +235,34 @@ def send_email(subject:str,body:str)->bool:
         return False
 
 
+def load_job_nonlinks_cache() -> dict:
+    """Load the job links cache from JSON file."""
+    cache_file = Path(".cache/job_nonlinks_cache.json")
+    if not cache_file.exists():
+        return {"version": "1.0", "cache": {}}
+    try:
+        with open(cache_file, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading cache: {str(e)}")
+        return {"version": "1.0", "cache": {}}
+
+def save_job_nonlinks_cache(cache: dict) -> None:
+    """Save the job links cache to JSON file."""
+    cache_file = Path(".cache/job_nonlinks_cache.json")
+    try:
+        with open(cache_file, 'w') as f:
+            json.dump(cache, f, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving cache: {str(e)}")
+
 # %% Functions to be imported by pipelines
-def get_unread_emails() -> List[str]:
+def get_unread_emails() -> List[Tuple[str, str]]:
     """
-    Retrieve content of unread emails in jobs folder from Gmail.
+    Retrieve content and sender information of unread emails in jobs folder from Gmail.
     
     Returns:
-        List of email contents (snippets) from unread emails
+        List of tuples containing (email_body, sender) for each unread email
     """
     
     # Get environment variables
@@ -219,17 +302,18 @@ def get_unread_emails() -> List[str]:
             # Parse the email message
             msg = email.message_from_bytes(msg_data[0][1])
             
-            # Get email body
+            # Get email body and sender
+            sender = msg['From']
             if msg.is_multipart():
                 for part in msg.walk():
                     content_type = part.get_content_type()
                     if content_type == 'text/plain':
                         body = part.get_payload(decode=True).decode()
-                        email_contents.append(body)
+                        email_contents.append((body, sender))
                         break
             else:
                 body = msg.get_payload(decode=True).decode()
-                email_contents.append(body)
+                email_contents.append((body, sender))
         
         # Close the connection
         mail.close()
@@ -241,17 +325,65 @@ def get_unread_emails() -> List[str]:
         print(f"Error fetching unread emails: {str(e)}")
         return []
 
+def remember_non_job_link(sender: str, link: str, remove_after: List[str] = ['&','?']) -> bool:
+    """
+    Add a non-job link to the cache for a specific sender.
+    If the sender doesn't exist in the cache, creates a new entry.
+    
+    Args:
+        sender: Email address of the sender
+        link: The non-job link to add
+    """
+    try:
+        # Remove query parameters from link
+        for param in remove_after:
+            link = link.split(param)[0]
 
-
+        # Load cache
+        cache = load_job_nonlinks_cache()
+        
+        # Get sender's links or create new list
+        if sender not in cache["cache"]:
+            cache["cache"][sender] = []
+        
+        # Add link if not already present
+        if link not in cache["cache"][sender]:
+            cache["cache"][sender].append(link)
+            
+        # Save updated cache
+        save_job_nonlinks_cache(cache)
+        
+    except Exception as e:
+        logger.error(f"Error adding non-job link to cache: {str(e)}")
+        return False
+    return True
+    
 def extract_job_links(
-    content: str
+    content: str,
+    sender: str
     )->List[str]:
     """
-    Extract job links from job mails.
+    Extract job links from job mails, using cache if available.
     """
-
     try:
-        return extract_job_links_by_tag(content,keywords=get_joblink_tags(content))
+        # Load cache
+        cache = load_job_nonlinks_cache()
+        
+        # Check if sender is in cache
+        if sender in cache["cache"]:
+            exclude_patterns = cache["cache"][sender]
+        else:   
+            # If not in cache, extract links and update cache
+            exclude_patterns = exclude_non_joblinks(content)
+            
+        links = extract_job_links_with_exceptions(content, exclude_patterns=exclude_patterns)
+        
+        # Update cache
+        cache["cache"][sender] = exclude_patterns
+        save_job_nonlinks_cache(cache)
+        
+        return links
+        
     except Exception as e:
         logger.error(f"Error extracting job links: {str(e)}")
         return []
