@@ -62,3 +62,6 @@ Thumbs.db
 
 # SSH
 .ssh
+
+# .coverage from tests
+.coverage
