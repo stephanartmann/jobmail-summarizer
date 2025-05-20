@@ -9,7 +9,7 @@ from typing import Callable,Optional
 import json
 
 from utils import extract_job_links, get_chrome_driver, get_page_content_with_driver
-
+from selenium import webdriver
 
 # %% Load environment variables
 load_dotenv()
@@ -58,8 +58,7 @@ def summarize_content(content:str,driver:webdriver.Chrome):
     except Exception as e:
         print(f"Error analyzing email: {str(e)}")
         return {}
-    finally:
-        driver.quit()
+
 
 
 def check_if_login(url, page_content):
@@ -105,15 +104,15 @@ def check_if_login(url, page_content):
 # %% Functions to be called by other scripts
 def summarize_website(url:str,sender:str):
     driver = get_chrome_driver()
-    page_content = get_page_content_with_driver(url, driver)
+    page_content = get_page_content_with_driver(url, driver,markdown_output=False)
     is_job_page, is_login_page, login_fields = check_if_login(url, page_content)
     if is_login_page:
         if not login_to_webpage(url, login_fields):
             return {}
-        page_content = get_page_content_with_driver(url, driver)
+        page_content = get_page_content_with_driver(url, driver,markdown_output=False)
         is_job_page, is_login_page, login_fields = check_if_login(url, page_content)
     if is_job_page:
-        return summarize_content(page_content, driver)
+        return summarize_content(get_page_content_with_driver(url, driver), driver)
     return {}
 
 

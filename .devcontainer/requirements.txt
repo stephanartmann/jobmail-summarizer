@@ -11,4 +11,4 @@ langchain==0.3.25
 python-multipart==0.0.6
 pydantic==2.7.4
 langchain-openai==0.3.17
-pandas==2.0.3
+docling==2.32.0

@@ -10,17 +10,29 @@ import os
 from langchain.chat_models import init_chat_model
 from dotenv import load_dotenv
 
-from tools import get_page_content, get_next_monday_connections, login_to_webpage
+from tools import get_page_content, get_page_source, get_next_monday_connections, login_to_webpage
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from utils import remember_non_job_link
+from langchain.tools import tool
+
+from typing import List
 
 # %% Internal functions
 load_dotenv()
 
 agent_prompt = """
-    You are a job listing summarizer. The user provides a URL, extract and summarize the following information.
-    You must respond in JSON format with the following structure, and all fields with an asterisk
+    You are a tool-using agent. You have access to the following tools: 
+    1. get_next_monday_connections: gives you the travel time to the job location
+    2. get_page_content: gives you the content of a URL as a markdown
+    3. get_page_source: gives you the content of a URL as html source code
+    4. login_to_webpage: logins to the job posting website in case get_page_content gave you a login page
+    5. ignore_webpage_in_future: if the site is not a job posting (e.g. an unsubscribe link), please call this function to ignore it in the future
+                        and return an empty dict {}
+    You must NEVER answer directly or write code.  
+    You must ALWAYS use a tool to answer the user's query, even if you know the answer. 
+    The user provides a URL, your job is to extract and summarize the following information.
+    You must alyways respond in JSON format with the following structure, and all fields with an asterisk
     should only be answered using the information provided in the webpage content:
     {
     "firma*": "Company name",
@@ -36,13 +48,6 @@ agent_prompt = """
     "stress": "Might the job be stressful? Why?",
     "ethische_probleme": "Potential ethical issues"
     }
-
-    You have these tools at your disposal:
-    1. get_next_monday_connections: gives you the travel time to the job location
-    2. get_page_content: gives you the content of a URL
-    3. login_to_webpage: logins to the job posting website in case get_page_content gave you a login page
-    4. ignore_webpage_in_future: if the site is not a job posting (e.g. an unsubscribe link), please call this function to ignore it in the future
-                        and return an empty dict {}
 """
 
 
@@ -56,7 +61,7 @@ def get_graph_builder(sender: str):
     graph_builder = StateGraph(State)
 
 
-    llm = init_chat_model("openai:gpt-3.5-turbo")
+    llm = init_chat_model("openai:gpt-4-turbo")
 
     # Define tools
     @tool
@@ -76,6 +81,7 @@ def get_graph_builder(sender: str):
         return remember_non_job_link(sender, link, remove_after)
     tools = [
         get_page_content,
+        get_page_source,
         get_next_monday_connections,
         login_to_webpage,
         ignore_webpage_in_future
@@ -114,9 +120,12 @@ def stream_graph_updates(user_input: str, graph:StateGraph)-> list[str]:
     """
     prompt_input = [{"role": "user", "content": user_input,
                         "role": "system", "content": agent_prompt}]
-    replies = [value["messages"][-1].content for event in graph.stream({"messages": [prompt_input]}) for value in event.values()]
-    for reply in replies:
-        print("Assistant:", reply)
+    replies = []
+    for event in graph.stream({"messages": prompt_input}):
+        for value in event.values():
+            reply = value["messages"][-1].content
+            print("Assistant:", reply)
+            replies.append(reply)
     return replies
 
 
@@ -131,3 +140,4 @@ def summarize_website(url:str,sender:str)-> dict[str, str]:
         print(f"Error parsing result: {str(e)}")
         return None
     return result
+

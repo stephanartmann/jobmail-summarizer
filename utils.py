@@ -30,6 +30,7 @@ import re
 import json
 from pathlib import Path
 
+from docling.document_converter import DocumentConverter
 
 # %% Logging and configs
 
@@ -101,14 +102,14 @@ def extract_job_links_with_exceptions(content: str, exclude_patterns: List[str])
     Returns:
         List of extracted HTTPS links that don't match any exclude patterns
     """
-    # Find all HTTPS links using regex
-    https_links = re.findall(r'https://[\w.-]+(?:/[\w.-]*)*(?:\?[^\s]*)?(?:#[^\s]*)?', content)
+    # Find all HTTPS links using regex and exclude trailing non-URL characters
+    https_links = re.findall(r'https://[\w.-]+(?:/[\w.-]*)*(?:\?[\w.-]*)?(?:#[\w.-]*)?(?=[\s>]|$)', content)
     
     # Filter out links that contain any of the exclude patterns
-    filtered_links = [
+    filtered_links = list(set([
         link for link in https_links 
         if not any(pattern in link for pattern in exclude_patterns)
-    ]
+    ]))
     
     return filtered_links
 
@@ -388,7 +389,7 @@ def extract_job_links(
         logger.error(f"Error extracting job links: {str(e)}")
         return []
     
-def get_page_content_with_driver(driver:webdriver.Chrome,url: str) -> str:
+def get_page_content_with_driver(driver:webdriver.Chrome,url: str, markdown_output:bool=True) -> str:
     """
     Get page content from a URL
 
@@ -401,6 +402,13 @@ def get_page_content_with_driver(driver:webdriver.Chrome,url: str) -> str:
     driver.get(url)
     time.sleep(15)  # Wait for content to load
     page_content = driver.page_source
+    if markdown_output:
+        os.makedirs(".cache/html", exist_ok=True)
+        filename = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        with open(f".cache/html/{filename}.html", "w") as f:
+            f.write(page_content)
+        converter = DocumentConverter()
+        return converter.convert(f".cache/html/{filename}.html").document.export_to_markdown()
     return page_content
 
 
