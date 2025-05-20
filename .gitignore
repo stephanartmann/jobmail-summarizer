@@ -33,6 +33,8 @@ wheels/
 
 # Logs
 *.log
+logs/
+reports/
 
 # Virtual Environment
 venv/
@@ -47,6 +49,22 @@ ENV/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Jenkins workspace
+workspace/
+
+# Test reports
+reports/*
+!reports/.gitkeep
+
+# Keep empty reports directory
+tests/__pycache__/
+
+# Production files
+.env.prod
+*.pem
+*.key
+*.crt
 
 # Dev Container
 .dockerignore

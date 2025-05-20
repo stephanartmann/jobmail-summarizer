@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  job-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile.jenkins
+    container_name: job-monitor-jenkins
+    environment:
+      - PYTHONUNBUFFERED=1
+      # Other environment variables will be passed from Jenkins
+    volumes:
+      - ./reports:/app/reports
+    # Don't auto-restart in CI environment
+    restart: "no"
