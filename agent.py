@@ -10,7 +10,7 @@ import os
 from langchain.chat_models import init_chat_model
 from dotenv import load_dotenv
 
-from tools import get_page_content, get_page_source, get_next_monday_connections, login_to_webpage
+from tools import get_page_content, get_page_source, get_next_monday_connections, login_to_webpage, summarize_job
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from utils import remember_non_job_link
@@ -21,7 +21,7 @@ from typing import List
 # %% Internal functions
 load_dotenv()
 
-agent_prompt = """
+agent_prompt_old = """
     You are a tool-using agent. You have access to the following tools: 
     1. get_next_monday_connections: gives you the travel time to the job location
     2. get_page_content: gives you the content of a URL as a markdown
@@ -50,6 +50,22 @@ agent_prompt = """
     }
 """
 
+agent_prompt = """
+    You are a tool-using agent. Your mission is to take in a URL from the user, and 
+    a) either find all information for the tool summarize_job and call it,
+    b) or find out that the URL does not point to a job posting site or login page, and call the ignore_webpage_in_future tool
+    
+    You have access to the following tools: 
+    1. get_next_monday_connections: gives you the travel time to the job location
+    2. get_page_content: gives you the content of a URL as a markdown
+    3. get_page_source: gives you the content of a URL as html source code
+    4. login_to_webpage: logins to the job posting website in case get_page_content gave you a login page
+    5. ignore_webpage_in_future: if the site is not a job posting (e.g. an unsubscribe link), please call this function to ignore it in the future
+                        and return without calling tool number six
+    6. summarize_job: create a job summary. Use this tool to answer the user's query.
+    You must NEVER answer directly or write code.  
+    You must ALWAYS use a tool to answer the user's query, even if you think you know the answer. 
+"""
 
 def get_graph_builder(sender: str):
     """
@@ -83,25 +99,64 @@ def get_graph_builder(sender: str):
         get_page_content,
         get_page_source,
         get_next_monday_connections,
-        login_to_webpage,
-        ignore_webpage_in_future
-    ]
-    llm_with_tools = llm.bind_tools(tools)
+        login_to_webpage    ]
+    end_tools = [summarize_job, ignore_webpage_in_future]
+    llm_with_tools = llm.bind_tools(tools + end_tools)
 
     def chatbot(state: State):
         return {"messages": [llm_with_tools.invoke(state["messages"])]}
 
+    def route_tools(
+        state: State,
+    ):
+        """
+        Route messages based on tool calls in the last message.
+        - If there are tool calls and they are end_tools (summarize_job or ignore_webpage_in_future), route to 'end_tools'.
+        - If there are other tool calls, route to 'tools'.
+        - If no tool calls, route to END.
+        """
+        if isinstance(state, list):
+            ai_message = state[-1]
+        elif messages := state.get("messages", []):
+            ai_message = messages[-1]
+        else:
+            raise ValueError(f"No messages found in input state to tool_edge: {state}")
+            
+        if hasattr(ai_message, "tool_calls") and len(ai_message.tool_calls) > 0:
+            # Check if any of the tool calls are end_tools
+            for tool_call in ai_message.tool_calls:
+                if tool_call['name'] in [tool.name for tool in end_tools]:
+                    return "end_tools"
+            # If we get here, there are tool calls but none of them are end_tools
+            return "tools"
+        return END
+
     graph_builder.add_node("chatbot", chatbot)
 
+    # Tools
     tool_node = ToolNode(tools=tools)
     graph_builder.add_node("tools", tool_node)
 
+    #graph_builder.add_conditional_edges(
+    #    "chatbot",
+    #    tools_condition,
+    #)
+
+    # End tools
+    end_tool_node = ToolNode(tools=end_tools)
+    graph_builder.add_node("end_tools", end_tool_node)
+
     graph_builder.add_conditional_edges(
         "chatbot",
-        tools_condition,
+        route_tools,
+        {"tools": "tools","end_tools":"end_tools", END: END},
     )
-    # Any time a tool is called, we return to the chatbot to decide the next step
+
+    ## Any time a tool is called, we return to the chatbot to decide the next step
     graph_builder.add_edge("tools", "chatbot")
+    ## Any time an end tool is called, we end
+    graph_builder.add_edge("end_tools", END)
+    
     graph_builder.add_edge(START, "chatbot")
     return graph_builder
 
@@ -134,10 +189,5 @@ def summarize_website(url:str,sender:str)-> dict[str, str]:
     graph = get_graph_builder(sender).compile()
     replies = stream_graph_updates(url, graph)
     result = replies[-1]
-    try:
-        result = json.loads(result)
-    except Exception as e:
-        print(f"Error parsing result: {str(e)}")
-        return None
     return result
 
