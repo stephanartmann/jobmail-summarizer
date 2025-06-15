@@ -5,7 +5,10 @@
 
 This system automatically monitors your email for new job listings, processes them, and sends a summarized report to your specified email address.
 
-This system automatically monitors your email for new job listings, processes them, and sends a summarized report to your specified email address.
+The workflow starts at `main.py`, which coordinates the extraction of job links from unread emails and their summarization. Two pipelines are available:
+
+- `agent` – uses a single AI agent to summarize a job listing.
+- `static` – a more deterministic workflow consisting of several LLM calls.
 
 ## CI/CD with Jenkins
 
@@ -76,9 +79,9 @@ Then edit the `.env` file with your actual values. The `.env.example` file conta
    - Create credentials (OAuth 2.0 Client IDs)
    - Download the credentials.json file and place it in the project root
 
-4. Run the script:
+4. Run the application. Choose the pipeline you want to use (`agent` or `static`):
 ```bash
-python job_monitor.py
+python main.py agent
 ```
 
 ## On-Premises Deployment
@@ -148,6 +151,57 @@ pytest tests/ -v --cov=. --cov-report=html
 - Creates a formatted summary table
 - Sends summaries to specified email address
 - Handles LinkedIn authentication for protected job listings
+
+## Testing
+
+This project includes a comprehensive test suite using `pytest`. The tests are organized into unit and integration tests.
+
+### Running Tests
+
+1. **Install test dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Run all tests**:
+   ```bash
+   pytest
+   ```
+
+3. **Run specific test categories**:
+   ```bash
+   # Run only unit tests
+   pytest tests/unit/
+   
+   # Run only integration tests
+   pytest tests/integration/
+   
+   # Run tests matching a pattern
+   pytest -k "test_extract"
+   ```
+
+4. **Generate coverage report**:
+   ```bash
+   pytest --cov=utils --cov-report=term-missing
+   ```
+
+### Test Organization
+
+- **Unit Tests**: Test individual functions in isolation
+  - `tests/unit/test_parsing.py`: Tests for text and HTML parsing functions
+  - `tests/unit/test_cache.py`: Tests for caching functionality
+  - `tests/unit/test_openai_integration.py`: Tests for OpenAI API integration
+
+- **Integration Tests**: Test interactions between components
+  - `tests/integration/test_email_flow.py`: Tests for email processing
+  - `tests/integration/test_login_flow.py`: Tests for login functionality
+
+### Continuous Integration
+
+Tests are automatically run on push and pull requests using GitHub Actions. The workflow includes:
+- Running unit and integration tests
+- Generating code coverage reports
+- Uploading coverage to Codecov
 
 ## Configuration
 
