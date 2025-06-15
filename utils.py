@@ -42,6 +42,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Constants
+CACHE_FILE = 'job_links_cache.json'  # File to store non-job links cache
 DEFAULT_CHROME_OPTIONS = {
     'headless': True,
     'no_sandbox': True,
@@ -192,19 +193,30 @@ def extract_job_links_by_tag(
         List of extracted job-related links
     """
     soup = BeautifulSoup(content, 'html.parser')
-    links = []
+    links = set()  # Use a set to avoid duplicates
     
     try:
         for link in soup.find_all('a'):
-            href = link.get('href')
-        if href and any([keyword in href.lower() for keyword in keywords]):
-                links.append(href)
-        
-        logger.info(f"Extracted {len(links)} job-related links")
-        return links
+            href = link.get('href', '').strip()
+            if not href or len(href) < min_link_length:
+                continue
+                
+            # Skip non-http links (mailto:, tel:, etc.)
+            if ':' in href and not href.startswith(('http://', 'https://', '/')):
+                continue
+            
+            # Only process absolute URLs
+            if href.startswith(('http://', 'https://')):
+                href_lower = href.lower()
+                # If keywords are provided, check if any keyword is in the URL
+                if not keywords or any(keyword in href_lower for keyword in keywords):
+                    links.add(href)
     except Exception as e:
-        logger.error(f"Error extracting links: {str(e)}")
-        return []
+        logger.error(f"Error extracting job links: {str(e)}")
+    
+    links_list = sorted(list(links))  # Sort for consistent test results
+    logger.info(f"Extracted {len(links_list)} job-related links")
+    return links_list
 
 
 def send_email(subject:str,body:str)->bool:
@@ -238,24 +250,36 @@ def send_email(subject:str,body:str)->bool:
 
 def load_job_nonlinks_cache() -> dict:
     """Load the job links cache from JSON file."""
-    cache_file = Path(".cache/job_nonlinks_cache.json")
-    if not cache_file.exists():
+    if not Path(CACHE_FILE).exists():
         return {"version": "1.0", "cache": {}}
     try:
-        with open(cache_file, 'r') as f:
+        with open(CACHE_FILE, 'r') as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"Error loading cache: {str(e)}")
         return {"version": "1.0", "cache": {}}
 
 def save_job_nonlinks_cache(cache: dict) -> None:
-    """Save the job links cache to JSON file."""
-    cache_file = Path(".cache/job_nonlinks_cache.json")
+    """
+    Save the cache of non-job links to a JSON file.
+    
+    Args:
+        cache: Cache dictionary to save, expected to have a 'cache' key
+    """
     try:
-        with open(cache_file, 'w') as f:
-            json.dump(cache, f, indent=2)
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(os.path.abspath(CACHE_FILE)), exist_ok=True)
+        
+        # Ensure we're saving a valid cache structure
+        if not isinstance(cache, dict) or 'cache' not in cache.keys():
+            logger.warning("Invalid cache structure, resetting to default")
+            cache = {"version": "1.0","cache": {}}
+            
+        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, indent=2, ensure_ascii=False)
     except Exception as e:
-        logger.error(f"Error saving cache: {str(e)}")
+        logger.error(f"Error saving cache file: {e}")
+
 
 # %% Functions to be imported by pipelines
 def get_unread_emails() -> List[Tuple[str, str]]:
@@ -265,7 +289,6 @@ def get_unread_emails() -> List[Tuple[str, str]]:
     Returns:
         List of tuples containing (email_body, sender) for each unread email
     """
-    
     # Get environment variables
     email_user = os.getenv('EMAIL')
     email_pass = os.getenv('EMAIL_PASSWORD')
@@ -342,7 +365,7 @@ def remember_non_job_link(sender: str, link: str, remove_after: List[str] = ['&'
 
         # Load cache
         cache = load_job_nonlinks_cache()
-        
+    
         # Get sender's links or create new list
         if sender not in cache["cache"]:
             cache["cache"][sender] = []
@@ -358,13 +381,17 @@ def remember_non_job_link(sender: str, link: str, remove_after: List[str] = ['&'
         logger.error(f"Error adding non-job link to cache: {str(e)}")
         return False
     return True
-    
-def extract_job_links(
-    content: str,
-    sender: str
-    )->List[str]:
+
+def extract_job_links(content: str, sender: str) -> List[str]:
     """
     Extract job links from job mails, using cache if available.
+    
+    Args:
+        content: Email content to extract links from
+        sender: Email sender address for cache lookup
+        
+    Returns:
+        List of extracted job links
     """
     try:
         # Load cache
