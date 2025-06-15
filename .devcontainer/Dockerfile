@@ -68,7 +68,8 @@ USER vscode
 ##############################
 
 RUN python -c 'from webdriver_manager.chrome import ChromeDriverManager;ChromeDriverManager().install()'
-RUN chmod u+rwx /home/vscode/.wdm/drivers/chromedriver/linux64/136.0.7103.94/chromedriver-linux64/chromedriver
+RUN chmod u+rwx /home/vscode/.wdm/drivers/chromedriver/linux64/*/chromedriver-linux64/chromedriver
+RUN pip install -r requirements-dev.txt 
 
 ############################
 ### End Custom User Code ###
