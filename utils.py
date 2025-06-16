@@ -42,7 +42,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Constants
-CACHE_FILE = 'job_links_cache.json'  # File to store non-job links cache
+CACHE_FILE = '.cache/job_links_cache.json'  # File to store non-job links cache
 DEFAULT_CHROME_OPTIONS = {
     'headless': True,
     'no_sandbox': True,
