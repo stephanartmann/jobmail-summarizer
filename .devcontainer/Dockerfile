@@ -50,8 +50,10 @@ WORKDIR /workspace
 
 # Copy requirements.txt and install dependencies
 COPY requirements.txt .
+COPY requirements-dev.txt .
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements-dev.txt 
 
 # Set environment variables
 ENV PYTHONPATH=/workspace
@@ -69,7 +71,6 @@ USER vscode
 
 RUN python -c 'from webdriver_manager.chrome import ChromeDriverManager;ChromeDriverManager().install()'
 RUN chmod u+rwx /home/vscode/.wdm/drivers/chromedriver/linux64/*/chromedriver-linux64/chromedriver
-RUN pip install -r requirements-dev.txt 
 
 ############################
 ### End Custom User Code ###
