@@ -1,12 +1,14 @@
-FROM base
+FROM python:3.10-slim
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && apt-get install -y \
     curl \
     wget \
     unzip \
     git \
-    chromium \
+    google-chrome-stable \
     xvfb \
     && rm -rf /var/lib/apt/lists/*
 
@@ -18,29 +20,20 @@ RUN CHROME_DRIVER_VERSION=$(curl -sL https://chromedriver.storage.googleapis.com
     rm /tmp/chromedriver.zip
 
 # Set working directory
-WORKDIR /app
+WORKDIR /workspace
 
-# Copy requirements first for better caching
-COPY requirements.txt requirements-dev.txt ./
+# Copy requirements files
+COPY requirements*.txt ./
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
 
-# Copy application code
-COPY . .
-
 # Set environment variables
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/workspace
 ENV PATH=$PATH:/usr/local/bin
 ENV PYTHONUNBUFFERED=1
 
-# Create reports directory
-RUN mkdir -p /workspace/reports
-
-# Install ChromeDriver for testing
-RUN python -c 'from webdriver_manager.chrome import ChromeDriverManager;ChromeDriverManager().install()'
-RUN chmod u+rwx /root/.wdm/drivers/chromedriver/linux64/$(curl -sL https://chromedriver.storage.googleapis.com/LATEST_RELEASE)/chromedriver-linux64/chromedriver
-
-# Default command (can be overridden in docker-compose)
-CMD ["pytest", "tests/", "-v", "--junitxml=reports/junit.xml"]
+# Install ChromeDriver using webdriver-manager
+RUN python -c 'from webdriver_manager.chrome import ChromeDriverManager;ChromeDriverManager().install()' && \
+    chmod u+rwx /root/.wdm/drivers/chromedriver/linux64/*/chromedriver-linux64/chromedriver

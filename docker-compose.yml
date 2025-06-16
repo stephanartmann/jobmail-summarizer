@@ -1,19 +1,79 @@
 version: '3.8'
 
+# Define common environment variables for all services
+x-common-env: &common-env
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  SENDER_EMAIL: ${SENDER_EMAIL}
+  SENDER_PASSWORD: ${SENDER_PASSWORD}
+  RECIPIENT_EMAIL: ${RECIPIENT_EMAIL}
+  LINKEDIN_EMAIL: ${LINKEDIN_EMAIL}
+  LINKEDIN_PASSWORD: ${LINKEDIN_PASSWORD}
+  CHECK_INTERVAL: ${CHECK_INTERVAL:-43200}  # 12 hours by default
+  PYTHONUNBUFFERED: 1
+
 services:
-  job-monitor:
+  # Base image builder
+  base:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.base
+    image: job-monitor-base
+
+  # Development environment
+  dev:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    image: job-monitor-dev
+    container_name: job-monitor-dev
+    environment:
+      <<: *common-env
+    volumes:
+      - .:/workspace
+      - /workspace/__pycache__
+    user: vscode
+    working_dir: /workspace
+    command: tail -f /dev/null  # Keep container running
+
+  # Production application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.base
     container_name: job-monitor
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - SENDER_EMAIL=${SENDER_EMAIL}
-      - SENDER_PASSWORD=${SENDER_PASSWORD}
-      - RECIPIENT_EMAIL=${RECIPIENT_EMAIL}
-      - LINKEDIN_EMAIL=${LINKEDIN_EMAIL}
-      - LINKEDIN_PASSWORD=${LINKEDIN_PASSWORD}
-      - CHECK_INTERVAL=${CHECK_INTERVAL:-43200}  # 12 hours by default
+      <<: *common-env
     volumes:
-      - ./logs:/app/logs
+      - ./logs:/workspace/logs
     restart: unless-stopped
+    command: python -m src.main  # Adjust this to your main application command
+
+  # Test runner (for CI)
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.jenkins
+    container_name: job-monitor-test
+    environment:
+      <<: *common-env
+    volumes:
+      - ./reports:/workspace/reports
+    command: pytest tests/ -v --junitxml=reports/junit.xml
+
+  # For running tests locally (with volume mount for development)
+  test-local:
+    build:
+      context: .
+      dockerfile: Dockerfile.jenkins
+    container_name: job-monitor-test-local
+    environment:
+      <<: *common-env
+    volumes:
+      - .:/workspace
+      - /workspace/__pycache__
+    command: pytest tests/ -v --junitxml=reports/junit.xml
+
+# Define networks if needed
+networks:
+  default:
+    driver: bridge

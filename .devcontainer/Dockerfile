@@ -1,4 +1,4 @@
-FROM python:3.10
+FROM base
 
 # Install Jupyter and essential packages
 RUN pip install --no-cache-dir \
@@ -6,7 +6,7 @@ RUN pip install --no-cache-dir \
     jupyterlab \
     ipykernel \
     notebook \
-    jupyter_contrib_nbextensions 
+    jupyter_contrib_nbextensions
 
 # Create vscode user
 RUN groupadd --gid 1000 vscode && \
