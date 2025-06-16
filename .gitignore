@@ -70,10 +70,6 @@ tests/__pycache__/
 .dockerignore
 .docker
 
-# Cache files
-*.cache
-.cache/
-
 # Database
 *.db
 *.sqlite3
