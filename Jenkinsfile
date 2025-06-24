@@ -1,13 +1,14 @@
 pipeline {
-    agent any
+    agent { label 'local-docker' } 
     
     environment {
-        // These will be set in Jenkins credentials
-        DOCKER_REGISTRY = credentials('docker-registry')
-        DOCKER_CREDENTIALS_ID = 'docker-credentials'
-        
         // Test reports directory
         JUNIT_REPORT_PATH = 'reports/junit.xml'
+        
+        // Local image tags
+        BASE_IMAGE = "job-mail-summarizer-base:local"
+        TEST_IMAGE = "job-mail-summarizer-test:local"
+        PROD_IMAGE = "job-mail-summarizer:local"
     }
     
     options {
@@ -19,28 +20,57 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
+                echo "[DEBUG] Starting Checkout stage"
                 checkout scm
-                // Clean workspace
-                cleanWs()
+                // Removed cleanWs() from here as it's handled in the post section
+                echo "[DEBUG] Checkout completed"
+            }
+            post {
+                success { echo '✅ Checkout stage succeeded' }
+                failure { echo '❌ Checkout stage failed' }
             }
         }
         
         stage('Setup Environment') {
             steps {
+                echo "[DEBUG] Starting Setup Environment stage"
                 script {
                     // Create reports directory
                     sh 'mkdir -p reports'
+                    echo "[DEBUG] Created reports directory"
                 }
+                echo "[DEBUG] Setup Environment completed"
+            }
+            post {
+                success { echo '✅ Setup Environment stage succeeded' }
+                failure { echo '❌ Setup Environment stage failed' }
+            }
+        }
+        
+        stage('Build Base Image') {
+            steps {
+                echo "[DEBUG] Starting Build Base Image stage"
+                script {
+                    // Build the base Docker image locally
+                    docker.build(env.BASE_IMAGE, "-f Dockerfile.base .")
+                    echo "[DEBUG] Base image built locally"
+                }
+                echo "[DEBUG] Build Base Image completed"
+            }
+            post {
+                success { echo '✅ Build Base Image stage succeeded' }
+                failure { echo '❌ Build Base Image stage failed' }
             }
         }
         
         stage('Build & Test') {
             steps {
+                echo "[DEBUG] Starting Build & Test stage"
                 script {
-                    // Build the Docker image with Jenkins-specific Dockerfile
+                    // Build the test image using the base image
                     def testImage = docker.build(
-                        "job-mail-summarizer-test:${env.BUILD_NUMBER}",
-                        "-f Dockerfile.jenkins ."
+                        env.TEST_IMAGE,
+                        "--build-arg BASE_IMAGE=${env.BASE_IMAGE} -f Dockerfile.jenkins ."
                     )
                     
                     // Run tests in the container
@@ -57,7 +87,9 @@ pipeline {
                             --cov-report=xml:reports/coverage.xml
                         '''
                     }
+                    echo "[DEBUG] Tests completed"
                 }
+                echo "[DEBUG] Build & Test completed"
             }
             post {
                 always {
@@ -70,6 +102,8 @@ pipeline {
                         }
                     }
                 }
+                success { echo '✅ Build & Test stage succeeded' }
+                failure { echo '❌ Build & Test stage failed' }
             }
         }
         
@@ -78,30 +112,39 @@ pipeline {
                 branch 'main'
             }
             steps {
+                echo "[DEBUG] Starting Build Production Image stage"
                 script {
-                    // Build the production Docker image
+                    // Build the production Docker image using the base image
                     docker.build(
-                        "${DOCKER_REGISTRY}/job-mail-summarizer:${env.BUILD_NUMBER}",
-                        "-f Dockerfile ."
+                        env.PROD_IMAGE,
+                        "--build-arg BASE_IMAGE=${env.BASE_IMAGE} -f Dockerfile ."
                     )
+                    echo "[DEBUG] Production image built"
                 }
+                echo "[DEBUG] Build Production Image completed"
+            }
+            post {
+                success { echo '✅ Build Production Image stage succeeded' }
+                failure { echo '❌ Build Production Image stage failed' }
             }
         }
         
-        stage('Push to Registry') {
+        stage('Tag for Local Use') {
             when {
                 branch 'main'
             }
             steps {
+                echo "[DEBUG] Starting Tag for Local Use stage"
                 script {
-                    // Log in to Docker registry
-                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDENTIALS_ID) {
-                        // Push the built image
-                        docker.image("${DOCKER_REGISTRY}/job-mail-summarizer:${env.BUILD_NUMBER}").push()
-                        // Also tag as latest
-                        docker.image("${DOCKER_REGISTRY}/job-mail-summarizer:${env.BUILD_NUMBER}").push('latest')
-                    }
+                    // Tag the production image as 'latest' for local use
+                    sh "docker tag ${env.PROD_IMAGE} ${env.PROD_IMAGE.split(':')[0]}:latest"
+                    echo "[DEBUG] Tagged ${env.PROD_IMAGE} as latest"
                 }
+                echo "[DEBUG] Tag for Local Use completed"
+            }
+            post {
+                success { echo '✅ Tag for Local Use stage succeeded' }
+                failure { echo '❌ Tag for Local Use stage failed' }
             }
         }
         
@@ -110,6 +153,7 @@ pipeline {
                 branch 'main'
             }
             steps {
+                echo "[DEBUG] Starting Deploy to On-Prem stage"
                 script {
                     // SSH into the on-prem server and deploy
                     def remote = [:]
@@ -147,30 +191,35 @@ pipeline {
                     // Make script executable and run it
                     sshCommand remote: remote, command: 'chmod +x /path/to/your/app/deploy.sh'
                     sshCommand remote: remote, command: 'cd /path/to/your/app/ && ./deploy.sh'
+                    echo "[DEBUG] Deployment commands sent to remote server"
                 }
+                echo "[DEBUG] Deploy to On-Prem completed"
+            }
+            post {
+                success { echo '✅ Deploy to On-Prem stage succeeded' }
+                failure { echo '❌ Deploy to On-Prem stage failed' }
             }
         }
     }
     
     post {
         always {
-            // Clean up workspace
-            cleanWs()
-            
-            // Clean up Docker images
             script {
-                try {
+                // Ensure we're on a node for cleanup
+                node('local-docker') {
+                    // Clean up workspace
+                    cleanWs()
+                    
+                    // Clean up Docker images
                     sh 'docker system prune -f'
-                } catch (e) {
-                    echo 'Failed to clean up Docker: ' + e.toString()
                 }
             }
         }
         success {
-            echo 'Pipeline completed successfully!'
+            echo '✅ Pipeline completed successfully! ✅'
         }
         failure {
-            echo 'Pipeline failed!'
+            echo '❌ Pipeline failed! ❌'
             // Add notification here (e.g., email, Slack)
         }
     }

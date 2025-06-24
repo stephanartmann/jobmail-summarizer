@@ -1,15 +1,19 @@
 FROM python:3.10-slim
 
 # Install system dependencies
-RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg && \
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
-    apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y \
     curl \
     wget \
     unzip \
     git \
-    google-chrome-stable \
     xvfb \
+    gpg
+
+# Install Google Chrome
+RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor --yes -o /usr/share/keyrings/google-chrome-keyring.gpg 
+RUN echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list 
+RUN apt-get update && apt-get install -y \
+    google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
 # Install ChromeDriver
@@ -25,15 +29,43 @@ WORKDIR /workspace
 # Copy requirements files
 COPY requirements*.txt ./
 
-# Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
 
 # Set environment variables
 ENV PYTHONPATH=/workspace
 ENV PATH=$PATH:/usr/local/bin
 ENV PYTHONUNBUFFERED=1
 
-# Install ChromeDriver using webdriver-manager
-RUN python -c 'from webdriver_manager.chrome import ChromeDriverManager;ChromeDriverManager().install()' && \
-    chmod u+rwx /root/.wdm/drivers/chromedriver/linux64/*/chromedriver-linux64/chromedriver
+# Install devcontainer features
+RUN pip install python-dotenv
+
+# Install Jupyter and essential packages
+RUN pip install --no-cache-dir  \
+    jupyter \
+    jupyterlab \
+    ipykernel \
+    notebook \
+    jupyter_contrib_nbextensions
+
+################################
+### Begin Custom System Code ###
+################################
+
+# Install system dependencies
+RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
+    apt-get update && apt-get install -y \
+    curl \
+    wget \
+    unzip \
+    git \
+    google-chrome-stable \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+
+
+
+
+##############################
+### End Custom System Code ###
+##############################

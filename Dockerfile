@@ -1,21 +1,7 @@
-FROM python:3.10
+ARG BASE_IMAGE=python:3.10
+FROM ${BASE_IMAGE}
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    unzip \
-    git \
-    chromium \
-    xvfb \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install ChromeDriver
-RUN CHROME_DRIVER_VERSION=$(curl -sL https://chromedriver.storage.googleapis.com/LATEST_RELEASE) && \
-    wget -O /tmp/chromedriver.zip https://chromedriver.storage.googleapis.com/$CHROME_DRIVER_VERSION/chromedriver_linux64.zip && \
-    unzip /tmp/chromedriver.zip -d /usr/local/bin && \
-    chmod +x /usr/local/bin/chromedriver && \
-    rm /tmp/chromedriver.zip
+# System dependencies are already installed in the base image
 
 # Set working directory
 WORKDIR /app
@@ -24,8 +10,8 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
